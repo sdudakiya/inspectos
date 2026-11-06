@@ -1,0 +1,86 @@
+# 03 — Database and security
+
+## Schema sources and deployment caveat
+
+There are seven SQL migrations under `drizzle/migrations`; `supabase/config.toml` only names a project ID, and no Supabase CLI migration/function directory is present in this workspace. `drizzle/schema.ts` is an intentionally blank generated file even though Drizzle config points to it. This means schema execution in the live project, provisioning of extensions/buckets, and drift status are **UNVERIFIED**. [Drizzle config](../../drizzle.config.ts#L1-L9) · [blank TS schema](../../drizzle/schema.ts#L1) · [Supabase config](../../supabase/config.toml#L1) · [migration journal](../../drizzle/migrations/meta/_journal.json#L1-L46)
+
+## Follow-up migrations 0005–0006
+
+Migrations 0005–0006 are present and registered in the Drizzle journal. They are not confirmed as applied to Supabase; the fixes below remain pending until deployment. [Security migration](../../drizzle/migrations/0005_security_limits_and_staff_activation.sql#L1-L196) · [signup migration](../../drizzle/migrations/0006_signup_without_sample_orders.sql#L1-L31) · [journal](../../drizzle/migrations/meta/_journal.json#L32-L46)
+
+- Revokes authenticated execution of `has_role`; removes table-wide `UPDATE` on `shops` and `profiles`; grants `shops` updates only on `name`, `phone_number`, `timezone`, and `feature_flags`. Staff activation is now a `staff.manage`-guarded `set_staff_active` RPC that rejects self-deactivation. [Grants and RPC](../../drizzle/migrations/0005_security_limits_and_staff_activation.sql#L1-L34) · [settings caller](../../src/routes/_authenticated/settings.tsx#L228-L239)
+- Replaces `portal_authorize` with transactional validation that decisions are an array, exactly match all non-green findings, are unique, and contain boolean choices. [Validation](../../drizzle/migrations/0005_security_limits_and_staff_activation.sql#L66-L86)
+- Creates an RLS-enabled, service-role-only `api_rate_limits` table and a fixed-window `consume_api_rate_limit` function. Subjects are SHA-256 hashed; periodic cleanup removes old windows. [Schema/function/grants](../../drizzle/migrations/0005_security_limits_and_staff_activation.sql#L137-L195)
+- Extends `messages.delivery_status` with `simulated`, so mock WhatsApp messages are not represented as sent. [Constraint](../../drizzle/migrations/0005_security_limits_and_staff_activation.sql#L7-L9) · [mock sender](../../src/api/whatsapp.server.ts#L84-L96)
+- New signups now call `seed_shop(v_shop, false)`: starter pipeline, bays, vendors, DVI template, and RO sequence remain, but fabricated customer/vehicle/RO records are not created. Existing sample records are not deleted by migration 0006. [Signup trigger](../../drizzle/migrations/0006_signup_without_sample_orders.sql#L1-L31) · [seed behavior](../../drizzle/migrations/0001_shopos_business_functions.sql#L1-L54)
+
+## Tables, columns, relationships, indexes
+
+The canonical listed columns, relations and constraints below come from `0000_shopos_core_schema.sql`; nullable fields are indicated by `?`. Parentheses show important references/unique/check constraints. [Core migration](../../drizzle/migrations/0000_shopos_core_schema.sql#L1-L228)
+
+| Table | Columns (all columns listed) | Key relationships / indexes / constraints |
+|---|---|---|
+| `tenants` | `id`, `name`, `plan_tier`, `created_at`, `updated_at` | PK `id`; `plan_tier` defaults `enterprise`. |
+| `shops` | `id`, `tenant_id`, `name`, `subdomain`, `timezone`, `shop_mode`, `phone_number?`, `whatsapp_phone_number_id?`, `feature_flags`, `address`, `created_at`, `updated_at` | FK tenant; unique `subdomain`, unique WhatsApp phone ID; `shop_mode` in `(2,6)`. |
+| `profiles` | `id`, `shop_id`, `email`, `first_name`, `last_name`, `phone_number?`, `is_active`, `legacy_user_id?`, `created_at`, `updated_at` | `id` FK auth user; FK shop; unique legacy ID; `idx_profiles_shop`. No role column. |
+| `user_roles` | `id`, `user_id`, `shop_id`, `role` | FK auth user and shop; unique `user_id`; role enum below. |
+| `staff_invites` | `id`, `shop_id`, `email`, `first_name`, `last_name`, `role`, `invited_by?`, `created_at` | FK shop; unique index on `lower(email)` (global, not shop-scoped). |
+| `customers` | `id`, `shop_id`, `first_name`, `last_name`, `email?`, `phone_mobile`, `phone_alternate?`, `whatsapp_opt_in`, `whatsapp_opt_in_at?`, `whatsapp_opt_in_source?`, `whatsapp_opted_out_at?`, `communication_preferences`, `created_at`, `updated_at` | FK shop; index `(shop_id, phone_mobile)`. |
+| `vehicles` | `id`, `shop_id`, `customer_id`, `vin?`, `year`, `make`, `model`, `submodel?`, `engine?`, `license_plate?`, `odometer_in?`, `unit_number?`, `created_at`, `updated_at` | FK shop and customer. |
+| `status_pipelines` | `id`, `shop_id`, `step_order`, `status_code`, `label`, `color_hex`, `time_select_mode`, `default_duration_minutes`, `cooldown_seconds`, `requires_parts_vendor`, `requires_qc_signoff`, `requires_dvi_complete`, `is_terminal`, `created_at` | FK shop; unique `(shop_id,status_code)` and `(shop_id,step_order)`; checks for time mode. Migration 0002 makes order uniqueness non-deferrable. |
+| `bays` | `id`, `shop_id`, `name`, `bay_type`, `display_order` | FK shop; unique `(shop_id,name)`; bay type check. |
+| `parts_vendors` | `id`, `shop_id`, `name`, `phone?`, `is_active` | FK shop; unique `(shop_id,name)`. |
+| `ro_sequences` | `shop_id`, `next_value` | Shop PK/FK; sequence starts at 1000. |
+| `repair_orders` | `id`, `shop_id`, `customer_id`, `vehicle_id`, `ro_number`, `invoice_number?`, `stock_number?`, `keytag?`, `concern?`, `current_status_id`, `status_updated_at`, `eta_due_at?`, `wait_type`, `bay_id?`, `service_advisor_id?`, `assigned_technician_id?`, `parts_vendor_id?`, `dvi_status`, `qc_status`, `is_archived`, `row_version`, `created_by?`, `created_at`, `updated_at` | FKs to shop/customer/vehicle/pipeline/bay/profiles/vendors; unique `(shop_id,ro_number)`; active-board index `(shop_id,is_archived,current_status_id)`; checks for wait/DVI/QC status. |
+| `dvi_templates` | `id`, `shop_id`, `title`, `categories`, `is_default` | FK shop; JSONB category/template data. |
+| `dvi_inspections` | `id`, `shop_id`, `repair_order_id`, `template_id`, `technician_id?`, `access_token_hash?`, `access_token_expires_at?`, `submitted_at?`, `sent_at?`, `customer_viewed_at?`, `customer_authorized_at?`, `customer_signature_key?`, `customer_ip_address?`, `customer_user_agent?`, `consent_text?`, `created_at`, `updated_at` | FKs to shop/RO/template/profile; unique token hash and `(repair_order_id,template_id)`. |
+| `dvi_items` | `id`, `shop_id`, `dvi_id`, `category`, `title`, `condition`, `technician_notes?`, `estimated_cost?`, `customer_approved?`, `created_at`, `updated_at` | FK DVI; index on `dvi_id`; condition check; nonnegative numeric estimate. |
+| `dvi_media` | `id`, `shop_id`, `dvi_item_id`, `storage_key`, `media_type`, `content_type`, `byte_size`, `annotation_data?`, `created_at` | FK item; unique storage key; media type image/video check. |
+| `messages` | `id`, `shop_id`, `repair_order_id?`, `customer_id`, `channel`, `sender_user_id?`, `template_key`, `template_vars`, `body`, `delivery_status`, `provider_message_id?`, `error_code?`, `created_at` | FKs to shop/RO/customer/profile; unique provider ID; index `(shop_id,customer_id,created_at DESC)`; channel/status checks. |
+| `webhook_events` | `id`, `provider`, `event_id`, `shop_id?`, `payload`, `received_at`, `processed_at?` | Unique `(provider,event_id)` for idempotency; no FK for optional shop ID. |
+| `api_rate_limits` (migration 0005) | `bucket`, `subject_hash`, `window_started_at`, `request_count` | Composite PK `(bucket,subject_hash)`; stores hashed subjects and current fixed-window counter. RLS enabled; no client policy or grant. [Migration](../../drizzle/migrations/0005_security_limits_and_staff_activation.sql#L137-L146) |
+| `audit_events` | `id`, `shop_id`, `repair_order_id?`, `user_id?`, `event_type`, `payload`, `created_at` | FKs to shop/RO; index `(repair_order_id,created_at DESC)`. |
+
+The only declared enum is `public.app_role = mso_admin, owner, advisor, technician, parts_specialist`; repair-order wait, DVI, QC, channel, and delivery values are `CHECK` constraints, not enums. [Enum and status checks](../../drizzle/migrations/0000_shopos_core_schema.sql#L1-L3) · [RO and DVI checks](../../drizzle/migrations/0000_shopos_core_schema.sql#L120-L195) · [message checks](../../drizzle/migrations/0000_shopos_core_schema.sql#L196-L228)
+
+Indexes and uniqueness: `idx_profiles_shop`, `uq_staff_invites_email`, `idx_customers_phone`, `idx_ro_shop_active`, `idx_dvi_items_dvi`, `idx_messages_customer`, `idx_audit_order`; plus primary keys/unique constraints noted above. Foreign keys are not all composite with `shop_id`; business functions and RLS check several cross-row ownerships, but cross-shop referential integrity is not universally encoded as composite FKs. [Indexes](../../drizzle/migrations/0000_shopos_core_schema.sql#L37-L55) · [remaining indexes](../../drizzle/migrations/0000_shopos_core_schema.sql#L73-L228) · [order validation](../../drizzle/migrations/0001_shopos_business_functions.sql#L84-L143)
+
+## Triggers and SQL business functions
+
+- `touch_updated_at()` triggers update timestamps on `repair_orders`, `customers`, `vehicles`, `dvi_inspections`, `dvi_items`, `shops`, and `profiles`; `on_auth_user_created` runs `handle_new_user()` after insert to `auth.users`. [Triggers](../../drizzle/migrations/0000_shopos_core_schema.sql#L230-L238) · [signup trigger](../../drizzle/migrations/0001_shopos_business_functions.sql#L56-L82)
+- `seed_shop` inserts a default pipeline, bays, parts vendors, DVI template, sequence and (when enabled) eight sample customers/vehicles/orders. New unaffiliated users call it with samples enabled. [Seed function](../../drizzle/migrations/0001_shopos_business_functions.sql#L1-L54) · [signup path](../../drizzle/migrations/0001_shopos_business_functions.sql#L56-L82)
+- Transaction RPCs: `quick_add_order`, `transition_order`, `assign_bay`, `archive_order`, `assign_technician`, `set_whatsapp_consent`, `dvi_start`, `dvi_submit`, `dvi_send`, `portal_resolve`, `portal_authorize`. They use `SECURITY DEFINER` for guarded transactional writes; public portal functions are service-role only, and shop mutations are granted to authenticated after revoking `PUBLIC`/`anon`. [Functions and grants](../../drizzle/migrations/0001_shopos_business_functions.sql#L84-L351) · [final transition guards](../../drizzle/migrations/0004_transition_guards_tech_bay_dvi.sql#L1-L92)
+- `transition_order` locks an RO, checks shop/permissions, expected version, cooldown, terminal reopen, vendor, DVI/QC, technician and bay constraints; it increments `row_version`, updates status and writes `audit_events`. [Final function](../../drizzle/migrations/0004_transition_guards_tech_bay_dvi.sql#L3-L92)
+
+## RLS and table policies
+
+**Positive finding:** all 19 application tables created in migration 0000 and the `api_rate_limits` table in migration 0005 have `ENABLE ROW LEVEL SECURITY`. The core policies generally scope authenticated records to `current_shop_id()` and use `has_permission()` for writes; no RLS-disabled table was found in the supplied SQL. **UNVERIFIED:** remote catalog state may differ if migrations have not been applied or drifted. [Core RLS enablement](../../drizzle/migrations/0000_shopos_core_schema.sql#L284-L302) · [rate-limit RLS](../../drizzle/migrations/0005_security_limits_and_staff_activation.sql#L137-L146)
+
+| Table(s) | Policy behavior in supplied SQL |
+|---|---|
+| `tenants` | `tenant_read`: only tenant associated with caller's current shop. [Policy](../../drizzle/migrations/0000_shopos_core_schema.sql#L304-L305) |
+| `shops` | Shop-scoped select; update requires `settings.shop` in `USING`, but `WITH CHECK` only confirms current shop row ID. [Policies](../../drizzle/migrations/0000_shopos_core_schema.sql#L306-L309) |
+| `profiles` | Same-shop/self read; self or `staff.manage` update; post-update check enforces current shop ID. `user_roles` has read-only policy. [Policies](../../drizzle/migrations/0000_shopos_core_schema.sql#L310-L314) |
+| `staff_invites` | All operations only for current shop and `staff.manage`. [Policy](../../drizzle/migrations/0000_shopos_core_schema.sql#L315-L317) |
+| `customers` | Shop-scoped read; insert requires `ro.create`; update requires `ro.create` or `customers.consent`; no authenticated delete policy. [Policies](../../drizzle/migrations/0000_shopos_core_schema.sql#L319-L323) |
+| `vehicles` | Shop-scoped read; all writes require `ro.create`. [Policies](../../drizzle/migrations/0000_shopos_core_schema.sql#L324-L328) |
+| `status_pipelines`, `bays`, `parts_vendors` | Read by current shop; writes require `settings.pipeline`, `settings.shop`, or `settings.shop`/`parts.manage`, respectively. [Policies](../../drizzle/migrations/0000_shopos_core_schema.sql#L329-L340) |
+| `ro_sequences`, `repair_orders` | Read-only shop-scoped policies; writes go through definer functions. [Policies](../../drizzle/migrations/0000_shopos_core_schema.sql#L341-L343) |
+| `dvi_templates` | Shop-scoped read; writes require `settings.shop`. `dvi_inspections` is read-only to authenticated clients. [Policies](../../drizzle/migrations/0000_shopos_core_schema.sql#L344-L349) |
+| `dvi_items`, `dvi_media` | Shop-scoped read/write under `dvi.edit`; item policies block edits after customer authorization and verify DVI/shop ownership; media policy verifies item shop. [Policies](../../drizzle/migrations/0000_shopos_core_schema.sql#L350-L359) |
+| `messages` | Shop-scoped read requires `messages.view`; authenticated clients have no direct write grant/policy. [Policy/grants](../../drizzle/migrations/0000_shopos_core_schema.sql#L279-L282) · [policy](../../drizzle/migrations/0000_shopos_core_schema.sql#L360-L360) |
+| `webhook_events` | RLS enabled, but no authenticated policy is defined in these migrations; server service-role processing bypasses RLS. This is restrictive if intentional. [RLS enablement](../../drizzle/migrations/0000_shopos_core_schema.sql#L300-L302) · [service-role client](../../src/integrations/supabase/client.server.ts#L32-L59) |
+| `audit_events` | Any authenticated user scoped to the same shop may read audit rows; no `audit.view` permission check. [Policy](../../drizzle/migrations/0000_shopos_core_schema.sql#L361-L361) |
+
+### Security notes
+
+1. **Role enumeration:** baseline `has_role(_user_id, _role)` accepted arbitrary user IDs. Migration 0005 revokes authenticated execution; this protection is pending migration deployment. [Baseline function](../../drizzle/migrations/0000_shopos_core_schema.sql#L265-L269) · [revocation](../../drizzle/migrations/0005_security_limits_and_staff_activation.sql#L1-L2)
+2. **Column-level writes:** baseline grants allowed table-wide `UPDATE` on `shops` and `profiles`. Migration 0005 replaces shop update with selected-column grants and moves staff activation to a scoped RPC; live grants remain **UNVERIFIED** until applied. [Baseline grants](../../drizzle/migrations/0000_shopos_core_schema.sql#L279-L282) · [narrow grants/RPC](../../drizzle/migrations/0005_security_limits_and_staff_activation.sql#L4-L34)
+3. **Audit privacy:** `audit_events` rows are visible to all authenticated users in a shop; portal approval audit payload stores IP. Confirm this matches privacy policy and staff role requirements. [Audit policy](../../drizzle/migrations/0000_shopos_core_schema.sql#L361-L361) · [portal audit write](../../drizzle/migrations/0001_shopos_business_functions.sql#L334-L337)
+4. **Portal decision integrity:** baseline SQL accepted partial/duplicate decisions. The server now rejects duplicate IDs and migration 0005 validates exact coverage of all non-green findings; deployment is pending. [Server input](../../src/api/portal.functions.ts#L68-L84) · [hardened DB authorization](../../drizzle/migrations/0005_security_limits_and_staff_activation.sql#L66-L86)
+5. **Storage provisioning:** policy SQL assumes a bucket named `dvi-media` but does not create/configure it. The browser uploads and signs URLs for that bucket. Bucket privacy/limits/retention are **UNVERIFIED**. [Bucket policies](../../drizzle/migrations/0001_shopos_business_functions.sql#L353-L357) · [upload](../../src/components/ro/InspectionPanel.tsx#L190-L201) · [signed URL](../../src/api/portal.functions.ts#L27-L35)
+6. **No supplied migration-level RLS policy allows writes to `repair_orders`, `dvi_inspections`, `messages`, or `audit_events`; that is consistent with guarded RPC/server workflows.** [Grants and policies](../../drizzle/migrations/0000_shopos_core_schema.sql#L279-L282) · [RO/DVI/message policies](../../drizzle/migrations/0000_shopos_core_schema.sql#L341-L361)
+
+## Storage policies
+
+For bucket `dvi-media`, SQL defines authenticated SELECT for objects whose first path segment is the current shop ID; INSERT and DELETE additionally require `dvi.edit`. No UPDATE policy is defined. The customer portal uses the server service-role client to create one-hour signed media URLs, and signatures are uploaded under a DVI path. [Policies](../../drizzle/migrations/0001_shopos_business_functions.sql#L353-L357) · [signed URL](../../src/api/portal.functions.ts#L27-L35) · [signature upload](../../src/api/portal.functions.ts#L74-L89)

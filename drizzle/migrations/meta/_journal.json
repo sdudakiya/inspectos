@@ -1,0 +1,55 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1793784579289,
+      "tag": "0000_shopos_core_schema",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1793784804329,
+      "tag": "0001_shopos_business_functions",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793785948213,
+      "tag": "0002_pipeline_step_order_not_deferrable",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1793786586837,
+      "tag": "0003_revoke_anon_helpers",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793853584790,
+      "tag": "0004_transition_guards_tech_bay_dvi",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1793874212246,
+      "tag": "0005_security_limits_and_staff_activation",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793886074724,
+      "tag": "0006_signup_without_sample_orders",
+      "breakpoints": true
+    }
+  ]
+}

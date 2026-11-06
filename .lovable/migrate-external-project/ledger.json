@@ -1,0 +1,96 @@
+{
+  "source": "github:sdudakiya/ShopOs (Vue 3 + Express + Knex + Postgres monorepo)",
+  "capabilities": [
+    {
+      "capability": "code",
+      "source": "apps/web (Vue) + apps/api (Express)",
+      "outcome": "rebuild in TanStack Start + React",
+      "status": "in_progress",
+      "next_action": "Photo markup and offline tablet queue not yet rebuilt"
+    },
+    {
+      "capability": "schema",
+      "source": "apps/api/database/migrations 001-005",
+      "outcome": "migrate to Lovable Cloud with shop-scoped RLS",
+      "status": "verified",
+      "next_action": "none"
+    },
+    {
+      "capability": "records",
+      "source": "external Postgres (Neon)",
+      "outcome": "not migrated; user chose to enter customers, orders and staff themselves",
+      "status": "skipped_by_user",
+      "next_action": "none unless user changes mind"
+    },
+    {
+      "capability": "auth identities",
+      "source": "users table with argon2 hashes + JWT refresh tokens",
+      "outcome": "replaced with Lovable Cloud auth; staff will be invited fresh from Settings",
+      "status": "skipped_by_user",
+      "next_action": "none unless user changes mind"
+    },
+    {
+      "capability": "authorization",
+      "source": "packages/types/permissions.ts + Postgres RLS by shop",
+      "outcome": "user_roles table + has_permission() + RLS",
+      "status": "verified",
+      "next_action": "Shop isolation enforced by RLS on every table"
+    },
+    {
+      "capability": "uploaded file bytes",
+      "source": "S3/MinIO dvi media + signatures",
+      "outcome": "Lovable Cloud storage bucket",
+      "status": "verified",
+      "next_action": "Existing S3 objects need export if any production media exists"
+    },
+    {
+      "capability": "whatsapp provider",
+      "source": "Meta Cloud API (fake provider by default)",
+      "outcome": "preserve; fake provider when credentials absent",
+      "status": "implemented",
+      "next_action": "Fake provider active until Meta credentials are added"
+    },
+    {
+      "capability": "webhooks",
+      "source": "/api/v1/webhooks/whatsapp (delivery receipts)",
+      "outcome": "preserve at /api/public/webhooks/whatsapp",
+      "status": "implemented",
+      "next_action": "Point Meta webhook to /api/public/webhooks/whatsapp at cutover"
+    },
+    {
+      "capability": "realtime",
+      "source": "Socket.io board sync",
+      "outcome": "Lovable Cloud realtime",
+      "status": "verified",
+      "next_action": "none"
+    },
+    {
+      "capability": "background jobs",
+      "source": "pg-boss whatsapp worker, orphan sweeper, stuck-queued reconcile",
+      "outcome": "send inline from server function; sweepers dropped",
+      "status": "verified",
+      "next_action": "none"
+    },
+    {
+      "capability": "deferred features",
+      "source": "telephony screen-pop, time clock, DMS",
+      "outcome": "not built in source (deferred)",
+      "status": "accepted",
+      "next_action": "none"
+    },
+    {
+      "capability": "cutover",
+      "source": "",
+      "outcome": "",
+      "status": "pending",
+      "next_action": "Point Meta webhook to new URL; import data"
+    },
+    {
+      "capability": "verification",
+      "source": "",
+      "outcome": "",
+      "status": "verified",
+      "next_action": "Check-in, WhatsApp record, inspection, portal signing, status move checked in browser"
+    }
+  ]
+}

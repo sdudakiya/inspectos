@@ -1,0 +1,2 @@
+REVOKE EXECUTE ON FUNCTION public.current_shop_id(), public.has_permission(text), public.has_role(uuid, public.app_role), public.require_permission(text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.current_shop_id(), public.has_permission(text), public.has_role(uuid, public.app_role), public.require_permission(text) TO authenticated, service_role;

@@ -1,0 +1,2 @@
+ALTER TABLE public.status_pipelines DROP CONSTRAINT status_pipelines_shop_id_step_order_key;
+ALTER TABLE public.status_pipelines ADD CONSTRAINT status_pipelines_shop_id_step_order_key UNIQUE (shop_id, step_order);
